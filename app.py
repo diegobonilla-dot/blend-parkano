@@ -54,13 +54,13 @@ if st.button("🚀 GENERAR BLEND"):
             prob += peso_total <= 1030
             # Zinc: entre 11.60 y 11.80
             prob += zn_total >= 11.60 * peso_total
-            prob += zn_total <= 11.80 * peso_total
+            prob += zn_total <= 12.00 * peso_total
             # Plomo: entre 0.90 y 1.05
             prob += pb_total >= 0.90 * peso_total
-            prob += pb_total <= 1.05 * peso_total
+            prob += pb_total <= 1.00 * peso_total
             # Plata: entre 1.00 y 1.50 DM
             ag_total = pulp.lpSum([v[i] * df.loc[i, 'PESO'] * df.loc[i, 'LEY AG'] for i in idx])
-            prob += ag_total >= 1.00 * peso_total
+            prob += ag_total >= 1.1 * peso_total
             prob += ag_total <= 1.50 * peso_total
             
             # Resolver el problema
