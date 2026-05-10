@@ -52,10 +52,10 @@ if st.button("🚀 GENERAR BLEND"):
             # Peso: +/- 1000 TM
             prob += peso_total >= 980
             prob += peso_total <= 1030
-            # Zinc: entre 11.60 y 11.80
+            # Zinc: entre 11.60 y 12.00
             prob += zn_total >= 11.60 * peso_total
             prob += zn_total <= 12.00 * peso_total
-            # Plomo: entre 0.90 y 1.05
+            # Plomo: entre 0.90 y 1.00
             prob += pb_total >= 0.90 * peso_total
             prob += pb_total <= 1.00 * peso_total
             # Plata: entre 1.00 y 1.50 DM
