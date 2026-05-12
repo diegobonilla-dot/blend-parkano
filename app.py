@@ -1,12 +1,12 @@
 import streamlit as st
 import pandas as pd
-from pulp import LpProblem, LpVariable, lpSum, LpMinimize, value
+from pulp import LpProblem, LpVariable, lpSum, LpMinimize, value, LpStatus
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Sistema de Mezclas Parkano", layout="wide")
+st.set_page_config(page_title="Sistema Integral Parkano", layout="wide")
 
 def enviar_correo(asunto, cuerpo, destinatario):
     remitente = "mezclasparkano@gmail.com"
@@ -23,104 +23,104 @@ def enviar_correo(asunto, cuerpo, destinatario):
         server.sendmail(remitente, destinatario, msg.as_string())
         server.quit()
     except Exception as e:
-        st.error(f"Error al enviar correo: {e}")
+        st.error(f"Error correo: {e}")
 
-st.title("⚒️ Sistema de Optimización de Mezclas - Parkano")
+st.title("⚒️ Sistema de Mezclas y Balance Proyectado - Parkano")
 
-# --- BARRA LATERAL ---
+# --- 🎯 BARRA LATERAL: OBJETIVOS Y PLANTA ---
+st.sidebar.header("🎯 Objetivos del Blend")
+t_min = st.sidebar.number_input("Tonelaje Mínimo (TMH)", 0.0, 5000.0, 980.0)
+t_max = st.sidebar.number_input("Tonelaje Máximo (TMH)", 0.0, 5000.0, 1100.0)
+
+st.sidebar.subheader("Rangos de Cabeza")
+zn_min, zn_max = st.sidebar.slider("Rango Zn %", 0.0, 25.0, (11.0, 12.0))
+pb_min, pb_max = st.sidebar.slider("Rango Pb %", 0.0, 5.0, (0.8, 1.0))
+ag_min, ag_max = st.sidebar.slider("Rango Ag Oz/TM", 0.0, 5.0, (1.1, 1.5))
+
 st.sidebar.header("⚙️ Parámetros de Planta")
 h_perc = st.sidebar.slider("Humedad (%)", 0.0, 15.0, 10.0) / 100
-rec_zn = st.sidebar.number_input("Rec. Zinc (%)", 0.0, 100.0, 85.0) / 100
-rec_pb = st.sidebar.number_input("Rec. Plomo (%)", 0.0, 100.0, 80.0) / 100
-ley_conc_zn = st.sidebar.number_input("Ley Zn en Conc. (%)", 0.0, 100.0, 50.0)
-ley_conc_pb = st.sidebar.number_input("Ley Pb en Conc. (%)", 0.0, 100.0, 60.0)
+rec_zn = st.sidebar.number_input("Recup. Zn (%)", 0.0, 100.0, 88.0) / 100
+ley_conc_zn = st.sidebar.number_input("Ley Zn en Conc (%)", 0.0, 100.0, 50.0)
 
 sheet_url = st.text_input("Link de Google Sheets:", "https://docs.google.com/spreadsheets/d/1Pq6jsL26ne6BEvKLON3lr1AIWYyZksyRYVI7vuZ3QLE/edit#gid=0")
 
-if st.button("🚀 GENERAR BLEND"):
+if st.button("🚀 GENERAR BLEND Y BALANCE"):
     try:
-        # 1. Carga de datos
-        csv_url = sheet_url.split('/edit')[0] + '/export?format=csv'
+        # 1. Carga y Limpieza
+        base_url = sheet_url.split('/edit')[0]
+        gid = sheet_url.split('gid=')[1] if 'gid=' in sheet_url else '0'
+        csv_url = f"{base_url}/export?format=csv&gid={gid}"
         df = pd.read_csv(csv_url)
-        
-        # Limpieza inicial: pasar todo a mayúsculas y quitar espacios locos
         df.columns = [str(c).upper().strip() for c in df.columns]
         
-        # --- BUSCADOR INTELIGENTE DE COLUMNAS ---
-        # Buscamos la columna que CONTENGA la palabra clave
-        def buscar_columna(lista_nombres, palabra_clave):
-            for col in lista_nombres:
-                if palabra_clave in col:
-                    return col
-            return None
+        # Buscador de columnas robusto
+        c_lote = next((c for c in df.columns if "LOTE" in c), None)
+        c_peso = next((c for c in df.columns if "PESO" in c), None)
+        c_zn = next((c for c in df.columns if "ZN" in c), None)
+        c_pb = next((c for c in df.columns if "PB" in c), None)
+        c_ag = next((c for c in df.columns if "AG" in c), None)
 
-        c_lote = buscar_columna(df.columns, "LOTE")
-        c_peso = buscar_columna(df.columns, "PESO")
-        c_zn = buscar_columna(df.columns, "ZN")
-        c_pb = buscar_columna(df.columns, "PB")
-        c_ag = buscar_columna(df.columns, "AG")
-
-        # Validación
-        if not c_peso or not c_zn:
-            st.error(f"No pude identificar las columnas. Detecté: {list(df.columns)}")
-            st.stop()
-
-        # 2. Limpieza de datos (Convertir a números)
         for col in [c_peso, c_zn, c_pb, c_ag]:
-            if col:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
-        # Filtramos filas que no sean lotes (como los totales)
-        df = df[df[c_peso] > 0].copy()
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        df = df[df[c_peso] > 0.1].copy()
 
-        # 3. Optimización
-        prob = LpProblem("Mezcla", LpMinimize)
+        # 2. Optimización del Blend
+        prob = LpProblem("Blend_Parkano", LpMinimize)
         choices = LpVariable.dicts("L", df.index, lowBound=0)
-        prob += lpSum([choices[i] for i in df.index])
+        total_w = lpSum([choices[i] for i in df.index])
+        
+        prob += total_w # Función objetivo
+        prob += total_w >= t_min
+        prob += total_w <= t_max
         
         for i in df.index:
             prob += choices[i] <= df.loc[i, c_peso]
         
-        prob.solve()
+        # Restricciones de Leyes Ponderadas
+        prob += lpSum([choices[i] * df.loc[i, c_zn] for i in df.index]) >= zn_min * total_w
+        prob += lpSum([choices[i] * df.loc[i, c_zn] for i in df.index]) <= zn_max * total_w
+        prob += lpSum([choices[i] * df.loc[i, c_pb] for i in df.index]) >= pb_min * total_w
+        prob += lpSum([choices[i] * df.loc[i, c_pb] for i in df.index]) <= pb_max * total_w
+        prob += lpSum([choices[i] * df.loc[i, c_ag] for i in df.index]) >= ag_min * total_w
+        prob += lpSum([choices[i] * df.loc[i, c_ag] for i in df.index]) <= ag_max * total_w
         
-        if value(prob.status) == 1:
+        prob.solve()
+
+        if LpStatus[prob.status] == 'Optimal':
+            # --- PARTE 1: RESULTADOS DEL BLEND ---
             res = []
             for i in df.index:
                 val = value(choices[i])
                 if val and val > 0.1:
-                    res.append({
-                        "Lote": df.loc[i, c_lote],
-                        "Peso": val,
-                        "Ley ZN": df.loc[i, c_zn],
-                        "Ley PB": df.loc[i, c_pb]
-                    })
+                    res.append({"Lote": df.loc[i, c_lote], "TMH": val, "Zn%": df.loc[i, c_zn], "Pb%": df.loc[i, c_pb], "Ag Oz/TM": df.loc[i, c_ag]})
             
             rdf = pd.DataFrame(res)
-            st.subheader("📋 Resultados del Blend")
-            st.dataframe(rdf)
-            
-            # 4. Cálculos de Balance
-            p_tot = rdf['Peso'].sum()
-            zn_prom = (rdf['Peso'] * rdf['Ley ZN']).sum() / p_tot
-            pb_prom = (rdf['Peso'] * rdf['Ley PB']).sum() / p_tot
-            
-            tms = p_tot * (1 - h_perc)
-            conc_zn = (tms * (zn_prom/100) * rec_zn) / (ley_conc_zn/100)
-            conc_pb = (tms * (pb_prom/100) * rec_pb) / (ley_conc_pb/100)
+            st.subheader("📋 1. Reporte de Mezcla (Blend)")
+            st.table(rdf.style.format("{:.2f}", subset=["TMH", "Zn%", "Pb%", "Ag Oz/TM"]))
 
-            st.subheader("📊 Balance Proyectado")
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Total TMH", f"{p_tot:.2f}")
-            col2.metric("Conc. Zn (TMS)", f"{conc_zn:.2f}")
-            col3.metric("Conc. Pb (TMS)", f"{conc_pb:.2f}")
+            # --- PARTE 2: BALANCE METALÚRGICO PROYECTADO ---
+            p_tmh = rdf['TMH'].sum()
+            zn_cabeza = (rdf['TMH'] * rdf['Zn%']).sum() / p_tmh
+            pb_cabeza = (rdf['TMH'] * rdf['Pb%']).sum() / p_tmh
+            ag_cabeza = (rdf['TMH'] * rdf['Ag Oz/TM']).sum() / p_tmh
             
-            # 5. Envío de Correo
-            msg = f"Reporte Parkano:\nTotal: {p_tot:.2f} TMH\nZn: {zn_prom:.2f}%\nPb: {pb_prom:.2f}%"
-            enviar_correo("Reporte Blend", msg, "diego.bonilla@parkano.com.bo")
-            st.success("✅ ¡Proceso completo! Correo enviado.")
+            tms_cabeza = p_tmh * (1 - h_perc)
+            fino_zn = tms_cabeza * (zn_cabeza / 100) * rec_zn
+            tms_conc_zn = fino_zn / (ley_conc_zn / 100)
 
+            st.subheader("📊 2. Balance Metalúrgico Proyectado")
+            col1, col2, col3, col4 = st.columns(4)
+            col1.metric("Total Mezcla", f"{p_tmh:.2f} TMH")
+            col2.metric("Peso Seco", f"{tms_cabeza:.2f} TMS")
+            col3.metric("Conc. Zinc", f"{tms_conc_zn:.2f} TMS")
+            col4.metric("Ley Zn Cabeza", f"{zn_cabeza:.2f} %")
+
+            # Correo con toda la información
+            cuerpo = f"Reporte Parkano:\n\nBLEND: {p_tmh:.2f} TMH\nZn: {zn_cabeza:.2f}%\nPb: {pb_cabeza:.2f}%\nAg: {ag_cabeza:.2f}\nPROYECCIÓN: {tms_conc_zn:.2f} TMS Conc Zn"
+            enviar_correo("Sistema Parkano: Blend + Balance", cuerpo, "diego.bonilla@parkano.com.bo")
+            st.success("✅ Todo generado y enviado.")
         else:
-            st.error("No se pudo calcular una mezcla.")
+            st.error("❌ No hay combinación de lotes que cumpla con esas leyes y tonelaje.")
 
     except Exception as e:
-        st.error(f"Error detectado: {e}")
+        st.error(f"Error crítico: {e}")
