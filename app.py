@@ -41,38 +41,40 @@ sheet_url = st.text_input("Pega el link de Google Sheets:", "https://docs.google
 
 if st.button("🚀 GENERAR BLEND"):
     try:
-        # Limpieza del link para forzar descarga de CSV
+        # Forzar descarga de CSV
         csv_url = sheet_url.split('/edit')[0] + '/export?format=csv'
         df = pd.read_csv(csv_url)
         
-        # Guardamos nombres originales para mostrar, pero limpiamos para procesar
-        df.columns = [str(c).strip().upper() for c in df.columns]
+        # 1. Limpiar nombres de columnas (Quitar espacios y símbolos)
+        df.columns = [str(c).strip().upper().replace('%', '').replace('  ', ' ') for c in df.columns]
         
-        # Buscador de columnas mejorado
-        def encontrar_columna(claves):
-            for clave in claves:
-                for col in df.columns:
-                    if clave in col:
-                        return col
+        # 2. Buscador inteligente de columnas
+        def encontrar_col(claves):
+            for k in claves:
+                for c in df.columns:
+                    if k in c: return c
             return None
 
-        c_lote = encontrar_columna(['LOTE', 'ID'])
-        c_peso = encontrar_columna(['PESO', 'TMH', 'TM'])
-        c_zn = encontrar_columna(['ZN', 'ZINC'])
-        c_pb = encontrar_columna(['PB', 'PLOMO'])
-        c_ag = encontrar_columna(['AG', 'PLATA'])
+        c_lote = encontrar_col(['LOTE', 'ID'])
+        c_peso = encontrar_col(['PESO', 'TMH'])
+        c_zn = encontrar_col(['ZN', 'ZINC'])
+        c_pb = encontrar_col(['PB', 'PLOMO'])
+        c_ag = encontrar_col(['AG', 'PLATA'])
 
         if not all([c_lote, c_peso, c_zn, c_pb, c_ag]):
-            st.error(f"No encontré las columnas. El sistema leyó: {list(df.columns)}")
+            st.error(f"⚠️ Columnas no encontradas. Detectadas: {list(df.columns)}")
             st.stop()
 
-        # Convertir datos a números por si acaso vienen como texto
+        # 3. FILTRO CRUCIAL: Solo filas con datos reales (Elimina totales o vacíos)
         df[c_peso] = pd.to_numeric(df[c_peso], errors='coerce').fillna(0)
         df[c_zn] = pd.to_numeric(df[c_zn], errors='coerce').fillna(0)
         df[c_pb] = pd.to_numeric(df[c_pb], errors='coerce').fillna(0)
         df[c_ag] = pd.to_numeric(df[c_ag], errors='coerce').fillna(0)
+        
+        # Nos quedamos solo con lo que tiene peso real > 0
+        df = df[df[c_peso] > 0].copy()
 
-        # Optimización
+        # 4. Optimización
         prob = LpProblem("Mezcla", LpMinimize)
         choices = LpVariable.dicts("L", df.index, lowBound=0)
         prob += lpSum([choices[i] for i in df.index])
@@ -85,7 +87,7 @@ if st.button("🚀 GENERAR BLEND"):
             res = []
             for i in df.index:
                 val = value(choices[i])
-                if val and val > 0.01:
+                if val and val > 0.1:
                     res.append({
                         "Lote": df.loc[i, c_lote],
                         "Peso_TMH": val,
@@ -95,8 +97,8 @@ if st.button("🚀 GENERAR BLEND"):
                     })
             
             rdf = pd.DataFrame(res)
-            st.subheader("📋 Resultados del Blend")
-            st.dataframe(rdf.style.format({"Peso_TMH": "{:.2f}", "Zn%": "{:.2f}", "Pb%": "{:.2f}", "Ag_DM": "{:.2f}"}))
+            st.subheader("📋 Resumen del Blend")
+            st.table(rdf.style.format({"Peso_TMH": "{:.2f}", "Zn%": "{:.2f}", "Pb%": "{:.2f}", "Ag_DM": "{:.2f}"}))
             
             # Balance
             p_tot = rdf['Peso_TMH'].sum()
@@ -108,21 +110,19 @@ if st.button("🚀 GENERAR BLEND"):
             w_zn = (tms * (zn_p/100) * rec_zn) / (ley_conc_zn/100)
             w_pb = (tms * (pb_p/100) * rec_pb) / (ley_conc_pb/100)
 
-            st.subheader("📊 Balance Metalúrgico Proyectado")
+            st.subheader("📊 Balance Proyectado")
             c1, c2, c3 = st.columns(3)
-            c1.metric("Total TMH", f"{p_tot:.2f}")
-            c2.metric("Conc. Zn (TMS)", f"{w_zn:.2f}")
-            c3.metric("Conc. Pb (TMS)", f"{w_pb:.2f}")
-            
-            st.info(f"**Leyes Promedio Mezcla:** Zn: {zn_p:.2f}% | Pb: {pb_p:.2f}% | Ag: {ag_p:.2f} DM")
+            c1.metric("Total Blend (TMH)", f"{p_tot:.2f}")
+            c2.metric("Conc. Zinc (TMS)", f"{w_zn:.2f}")
+            c3.metric("Conc. Plomo (TMS)", f"{w_pb:.2f}")
 
             # Correo
-            msg = f"Reporte Mezcla Parkano:\n\nTotal: {p_tot:.2f} TMH\nLeyes: Zn {zn_p:.2f}%, Pb {pb_p:.2f}%\nConc. Zn: {w_zn:.2f} TMS\nConc. Pb: {w_pb:.2f} TMS"
-            enviar_correo("Nuevo Reporte de Mezcla", msg, "diego.bonilla@parkano.com.bo")
-            st.success("✅ ¡Correo enviado a diego.bonilla@parkano.com.bo!")
+            msg = f"Reporte Parkano:\n\nMezcla: {p_tot:.2f} TMH\nLeyes Promedio: Zn {zn_p:.2f}%, Pb {pb_p:.2f}%\nConc. Zn: {w_zn:.2f} TMS\nConc. Pb: {w_pb:.2f} TMS"
+            enviar_correo("Reporte Blend Parkano", msg, "diego.bonilla@parkano.com.bo")
+            st.success("✅ ¡Reporte generado y enviado!")
 
         else:
-            st.error("No se encontró una mezcla lógica con esos datos.")
+            st.error("Error en la lógica de mezcla. Verifica los datos del Excel.")
 
     except Exception as e:
-        st.error(f"Hubo un problema: {e}")
+        st.error(f"Hubo un problema con los datos del Excel: {e}")
