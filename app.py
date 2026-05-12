@@ -5,60 +5,60 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# --- CONFIGURACIÓN ---
-st.set_page_config(page_title="Sistema Parkano V4 - Balance Real", layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Sistema Parkano v5", layout="wide")
 
-def enviar_correo(asunto, cuerpo, destinatario):
+def enviar_correo(asunto, cuerpo_html, destinatario):
     remitente = "mezclasparkano@gmail.com"
+    # IMPORTANTE: Esta contraseña debe ser una "App Password" de Google
     password = "shre kfdy flin hscs" 
     msg = MIMEMultipart()
     msg['From'] = remitente
     msg['To'] = destinatario
     msg['Subject'] = asunto
-    msg.attach(MIMEText(cuerpo, 'html')) # Enviamos como HTML para mejor formato
+    msg.attach(MIMEText(cuerpo_html, 'html'))
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587)
         server.starttls()
         server.login(remitente, password)
         server.sendmail(remitente, destinatario, msg.as_string())
         server.quit()
+        return True
     except Exception as e:
-        st.error(f"Error correo: {e}")
+        st.error(f"Error al enviar correo: {e}")
+        return False
 
-st.title("⚒️ Sistema de Optimización: Blend & Balance Metalúrgico Proyectado")
+st.title("⚒️ Sistema de Optimización y Balance Metalúrgico - Parkano")
 
-# --- 🎯 PARÁMETROS EDITABLES (REQUERIMIENTOS JEFE) ---
-st.sidebar.header("🎯 Parámetros del Blend")
-t_min = st.sidebar.number_input("Tonelaje Mínimo (TMH)", value=980.0)
-t_max = st.sidebar.number_input("Tonelaje Máximo (TMH)", value=1100.0)
+# --- PARÁMETROS EN BARRA LATERAL ---
+st.sidebar.header("🎯 Objetivos del Blend")
+t_min = st.sidebar.number_input("Tonelaje Mínimo (TMH)", value=100.0)
+t_max = st.sidebar.number_input("Tonelaje Máximo (TMH)", value=500.0)
 
-st.sidebar.subheader("Leyes de Cabeza Objetivos")
-zn_obj = st.sidebar.slider("Rango Zn %", 0.0, 20.0, (11.0, 12.0))
-pb_obj = st.sidebar.slider("Rango Pb %", 0.0, 5.0, (0.8, 1.0))
-ag_obj = st.sidebar.slider("Rango Ag DM", 0.0, 5.0, (1.1, 1.5))
+st.sidebar.subheader("Leyes de Cabeza")
+zn_obj = st.sidebar.slider("Zn %", 0.0, 30.0, (10.0, 15.0))
+pb_obj = st.sidebar.slider("Pb %", 0.0, 10.0, (1.0, 3.0))
+ag_obj = st.sidebar.slider("Ag DM", 0.0, 5.0, (0.5, 2.0))
 
-st.sidebar.header("⚙️ Parámetros Metalúrgicos")
+st.sidebar.header("⚙️ Parámetros Planta")
 h_perc = st.sidebar.number_input("Humedad (%)", value=5.0) / 100
-rec_zn = st.sidebar.number_input("Recuperación Zn (%)", value=95.0) / 100
-rec_pb = st.sidebar.number_input("Recuperación Pb (%)", value=85.0) / 100
-rec_ag = st.sidebar.number_input("Recuperación Ag (%)", value=90.0) / 100
+rec_zn = st.sidebar.number_input("Rec. Zn (%)", value=95.0) / 100
+rec_pb = st.sidebar.number_input("Rec. Pb (%)", value=85.0) / 100
+rec_ag = st.sidebar.number_input("Rec. Ag (%)", value=90.0) / 100
 
-st.sidebar.subheader("Calidad de Concentrados")
-ley_c_zn = st.sidebar.number_input("Ley Zn en Conc. Zn (%)", value=50.0)
-ag_en_zn = st.sidebar.number_input("Ag Mínima en Conc. Zn (DM)", value=2.5)
-ley_c_pb = st.sidebar.number_input("Ley Pb en Conc. Pb (%)", value=60.0)
+sheet_url = st.text_input("Pega el link de Google Sheets aquí:", "https://docs.google.com/spreadsheets/d/1Pq6jsL26ne6BEvKLON3lr1AIWYyZksyRYVI7vuZ3QLE/edit#gid=0")
 
-sheet_url = st.text_input("Link de Google Sheets:", "https://docs.google.com/spreadsheets/d/1Pq6jsL26ne6BEvKLON3lr1AIWYyZksyRYVI7vuZ3QLE/edit#gid=0")
-
-if st.button("🚀 GENERAR BLEND Y BALANCE PROYECTADO"):
+if st.button("🚀 GENERAR BLEND Y BALANCE"):
     try:
-        # 1. CARGA DE DATOS
-        base_url = sheet_url.split('/edit')[0]
-        gid = sheet_url.split('gid=')[1] if 'gid=' in sheet_url else '0'
-        csv_url = f"{base_url}/export?format=csv&gid={gid}"
+        # 1. LECTURA DE DATOS
+        csv_url = sheet_url.replace('/edit#gid=', '/export?format=csv&gid=')
+        if '/edit' in sheet_url and 'gid=' not in sheet_url:
+            csv_url = sheet_url.replace('/edit', '/export?format=csv')
+            
         df = pd.read_csv(csv_url)
         df.columns = [str(c).upper().strip() for c in df.columns]
         
+        # Mapeo flexible de columnas (Para que no falle si cambia el nombre)
         c_lote = next((c for c in df.columns if "LOTE" in c), None)
         c_peso = next((c for c in df.columns if "PESO" in c), None)
         c_zn = next((c for c in df.columns if "ZN" in c), None)
@@ -67,99 +67,97 @@ if st.button("🚀 GENERAR BLEND Y BALANCE PROYECTADO"):
 
         for col in [c_peso, c_zn, c_pb, c_ag]:
             df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        df = df[df[c_peso] > 0.1].copy()
+        
+        df_clean = df[df[c_peso] > 0].copy()
 
-        # 2. GENERADOR DE BLEND
-        prob = LpProblem("Blend_Parkano", LpMinimize)
-        choices = LpVariable.dicts("L", df.index, lowBound=0)
-        tw = lpSum([choices[i] for i in df.index])
+        # 2. OPTIMIZADOR
+        prob = LpProblem("Optimizador_Parkano", LpMinimize)
+        idx = df_clean.index
+        vars = LpVariable.dicts("Lote", idx, lowBound=0)
         
-        prob += tw
-        prob += tw >= t_min
-        prob += tw <= t_max
-        for i in df.index:
-            prob += choices[i] <= df.loc[i, c_peso]
+        # Objetivo: Minimizar (solo para encontrar solución factible)
+        prob += lpSum([vars[i] for i in idx])
         
-        # Restricciones de Ley de Cabeza
-        prob += lpSum([choices[i] * df.loc[i, c_zn] for i in df.index]) >= zn_obj[0] * tw
-        prob += lpSum([choices[i] * df.loc[i, c_zn] for i in df.index]) <= zn_obj[1] * tw
-        prob += lpSum([choices[i] * df.loc[i, c_pb] for i in df.index]) >= pb_obj[0] * tw
-        prob += lpSum([choices[i] * df.loc[i, c_pb] for i in df.index]) <= pb_obj[1] * tw
-        prob += lpSum([choices[i] * df.loc[i, c_ag] for i in df.index]) >= ag_obj[0] * tw
-        prob += lpSum([choices[i] * df.loc[i, c_ag] for i in df.index]) <= ag_obj[1] * tw
-        
+        # Restricciones de Peso
+        total_w = lpSum([vars[i] for i in idx])
+        prob += total_w >= t_min
+        prob += total_w <= t_max
+        for i in idx:
+            prob += vars[i] <= df_clean.loc[i, c_peso]
+
+        # Restricciones de Leyes
+        prob += lpSum([vars[i] * df_clean.loc[i, c_zn] for i in idx]) >= zn_obj[0] * total_w
+        prob += lpSum([vars[i] * df_clean.loc[i, c_zn] for i in idx]) <= zn_obj[1] * total_w
+        prob += lpSum([vars[i] * df_clean.loc[i, c_pb] for i in idx]) >= pb_obj[0] * total_w
+        prob += lpSum([vars[i] * df_clean.loc[i, c_pb] for i in idx]) <= pb_obj[1] * total_w
+        prob += lpSum([vars[i] * df_clean.loc[i, c_ag] for i in idx]) >= ag_obj[0] * total_w
+        prob += lpSum([vars[i] * df_clean.loc[i, c_ag] for i in idx]) <= ag_obj[1] * total_w
+
         prob.solve()
 
         if LpStatus[prob.status] == 'Optimal':
-            # --- DATOS DEL BLEND ---
-            res = []
-            for i in df.index:
-                v = value(choices[i])
-                if v and v > 0.1:
-                    res.append({"Lote": df.loc[i, c_lote], "TMH": v, "Zn%": df.loc[i, c_zn], "Pb%": df.loc[i, c_pb], "Ag DM": df.loc[i, c_ag]})
-            rdf = pd.DataFrame(res)
+            # 3. RESULTADOS DEL BLEND
+            res_data = []
+            for i in idx:
+                tmh = value(vars[i])
+                if tmh > 0.1:
+                    res_data.append({
+                        "Lote": df_clean.loc[i, c_lote],
+                        "TMH": tmh,
+                        "Zn %": df_clean.loc[i, c_zn],
+                        "Pb %": df_clean.loc[i, c_pb],
+                        "Ag DM": df_clean.loc[i, c_ag]
+                    })
             
-            st.subheader("📋 1. Reporte de Mezcla (Blend Seleccionado)")
-            st.table(rdf.style.format("{:.2f}", subset=["TMH", "Zn%", "Pb%", "Ag DM"]))
+            rdf = pd.DataFrame(res_data)
+            st.subheader("📋 Resultados del Blend Seleccionado")
+            st.dataframe(rdf.style.format("{:.2f}", subset=["TMH", "Zn %", "Pb %", "Ag DM"]))
 
-            # --- CALCULOS DE BALANCE METALÚRGICO ---
+            # 4. BALANCE METALÚRGICO
             tmh_total = rdf['TMH'].sum()
-            zn_cab = (rdf['TMH'] * rdf['Zn%']).sum() / tmh_total
-            pb_cab = (rdf['TMH'] * rdf['Pb%']).sum() / tmh_total
-            ag_cab = (rdf['TMH'] * rdf['Ag DM']).sum() / tmh_total
+            zn_cabeza = (rdf['TMH'] * rdf['Zn %']).sum() / tmh_total
+            pb_cabeza = (rdf['TMH'] * rdf['Pb %']).sum() / tmh_total
+            ag_cabeza = (rdf['TMH'] * rdf['Ag DM']).sum() / tmh_total
             
-            tms_total = tmh_total * (1 - h_perc) # DESCUENTO DE HUMEDAD
+            tms_total = tmh_total * (1 - h_perc)
             
-            # Recuperación de Finos
-            fino_zn = tms_total * (zn_cab/100) * rec_zn
-            fino_pb = tms_total * (pb_cab/100) * rec_pb
-            fino_ag_total = tms_total * ag_cab * rec_ag # Finos de Plata en DM totales
+            # Concentrados
+            tms_conc_zn = (tms_total * (zn_cabeza/100) * rec_zn) / 0.50 # 50% Ley Zn
+            tms_conc_pb = (tms_total * (pb_cabeza/100) * rec_pb) / 0.60 # 60% Ley Pb
             
-            # Pesos de Concentrados
-            tms_conc_zn = fino_zn / (ley_c_zn/100)
-            tms_conc_pb = fino_pb / (ley_c_pb/100)
+            # Distribución de Plata
+            ag_fina_total = tms_total * ag_cabeza * rec_ag
+            ag_en_conc_zn = tms_conc_zn * 2.5 # Aseguramos 2.5 DM
+            ag_en_conc_pb = (ag_fina_total - ag_en_conc_zn) / tms_conc_pb
             
-            # DISTRIBUCIÓN DE PLATA (REQUERIMIENTO ESPECIAL)
-            # 1. Asegurar 2.5 DM en el conc de Zn
-            ag_fino_en_zn = tms_conc_zn * ag_en_zn
-            # 2. El resto va al conc de Pb
-            ag_fino_en_pb = fino_ag_total - ag_fino_en_zn
-            ley_ag_en_pb = ag_fino_en_pb / tms_conc_pb
+            st.subheader("📊 Balance Proyectado")
+            col1, col2 = st.columns(2)
+            col1.metric("Total TMH", f"{tmh_total:.2f}")
+            col1.metric("Total TMS (-5%)", f"{tms_total:.2f}")
+            col2.metric("Conc. Zn (TMS)", f"{tms_conc_zn:.2f}")
+            col2.metric("Conc. Pb (TMS)", f"{tms_conc_pb:.2f}")
 
-            # --- VISUALIZACIÓN ---
-            st.subheader("📊 2. Balance Metalúrgico Proyectado")
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.info("**ALIMENTACIÓN (CABEZA)**")
-                st.write(f"TMH: {tmh_total:.2f}")
-                st.write(f"TMS (Humedad {h_perc*100}%): {tms_total:.2f}")
-                st.write(f"Leyes: Zn {zn_cab:.2f}% | Pb {pb_cab:.2f}% | Ag {ag_cab:.2f} DM")
-            with c2:
-                st.success("**CONCENTRADO ZINC**")
-                st.write(f"Peso: {tms_conc_zn:.2f} TMS")
-                st.write(f"Ley Zn: {ley_c_zn}%")
-                st.write(f"Ley Ag (Asegurada): {ag_en_zn} DM")
-            with c3:
-                st.warning("**CONCENTRADO PLOMO**")
-                st.write(f"Peso: {tms_conc_pb:.2f} TMS")
-                st.write(f"Ley Pb: {ley_c_pb}%")
-                st.write(f"Ley Ag (Remanente): {ley_ag_en_pb:.2f} DM")
-
-            # --- ENVÍO DE CORREO HTML ---
-            html_msg = f"""
-            <h3>Reporte Operativo Parkano</h3>
-            <p><b>Blend:</b> {tmh_total:.2f} TMH ({tms_total:.2f} TMS)</p>
-            <p><b>Cabeza:</b> Zn {zn_cab:.2f}%, Pb {pb_cab:.2f}%, Ag {ag_cab:.2f} DM</p>
-            <hr>
-            <h4>Producción Proyectada:</h4>
-            <ul>
-                <li><b>Conc. Zn:</b> {tms_conc_zn:.2f} TMS @ {ley_c_zn}% Zn y {ag_en_zn} DM Ag</li>
-                <li><b>Conc. Pb:</b> {tms_conc_pb:.2f} TMS @ {ley_c_pb}% Pb y {ley_ag_en_pb:.2f} DM Ag</li>
-            </ul>
+            # 5. ENVIAR REPORTE
+            cuerpo = f"""
+            <html>
+            <body>
+                <h2>Reporte de Mezcla - Parkano</h2>
+                <p><b>TMH Total:</b> {tmh_total:.2f}</p>
+                <p><b>Leyes Cabeza:</b> Zn: {zn_cabeza:.2f}%, Pb: {pb_cabeza:.2f}%, Ag: {ag_cabeza:.2f} DM</p>
+                <hr>
+                <h3>Proyección de Concentrados:</h3>
+                <ul>
+                    <li><b>Zinc:</b> {tms_conc_zn:.2f} TMS (@ 50% Zn y 2.5 DM Ag)</li>
+                    <li><b>Plomo:</b> {tms_conc_pb:.2f} TMS (@ 60% Pb y {ag_en_conc_pb:.2f} DM Ag)</li>
+                </ul>
+            </body>
+            </html>
             """
-            enviar_correo("Balance Proyectado Parkano", html_msg, "diego.bonilla@parkano.com.bo")
-            st.success("✅ Balance enviado a correo.")
+            if enviar_correo("Nuevo Balance Proyectado", cuerpo, "diego.bonilla@parkano.com.bo"):
+                st.success("✅ Reporte enviado a diego.bonilla@parkano.com.bo")
+                
         else:
-            st.error("❌ Los parámetros actuales son imposibles con el stock disponible.")
+            st.warning("⚠️ No se encontró una mezcla que cumpla con esas leyes. Intenta ampliar los rangos.")
+
     except Exception as e:
-        st.error(f"Error: {e}")
+        st.error(f"Hubo un problema con los datos del Excel: {e}")
