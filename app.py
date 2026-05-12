@@ -35,7 +35,7 @@ rec_pb = st.sidebar.number_input("Rec. Plomo (%)", 0.0, 100.0, 80.0) / 100
 ley_conc_zn = st.sidebar.number_input("Ley Zn en Conc. (%)", 0.0, 100.0, 50.0)
 ley_conc_pb = st.sidebar.number_input("Ley Pb en Conc. (%)", 0.0, 100.0, 60.0)
 
-sheet_url = st.text_input("Pega el link de Google Sheets:", "https://docs.google.com/spreadsheets/d/1Pq6jsL26ne6BEvKLON3lr1AIWYyZksyRYVI7vuZ3QLE/edit#gid=0")
+sheet_url = st.text_input("Link de Google Sheets:", "https://docs.google.com/spreadsheets/d/1Pq6jsL26ne6BEvKLON3lr1AIWYyZksyRYVI7vuZ3QLE/edit#gid=0")
 
 if st.button("🚀 GENERAR BLEND"):
     try:
@@ -43,28 +43,37 @@ if st.button("🚀 GENERAR BLEND"):
         csv_url = sheet_url.split('/edit')[0] + '/export?format=csv'
         df = pd.read_csv(csv_url)
         
-        # Limpieza de nombres de columnas (Quitar espacios extra)
-        df.columns = [str(c).strip() for c in df.columns]
+        # Limpieza inicial: pasar todo a mayúsculas y quitar espacios locos
+        df.columns = [str(c).upper().strip() for c in df.columns]
         
-        # Mapeo EXACTO según tu imagen de Google Sheets
-        c_lote = "ID LOTE"
-        c_peso = "Peso"
-        c_zn = "Ley ZN"
-        c_pb = "Ley PB"
-        c_ag = "Ley AG"
+        # --- BUSCADOR INTELIGENTE DE COLUMNAS ---
+        # Buscamos la columna que CONTENGA la palabra clave
+        def buscar_columna(lista_nombres, palabra_clave):
+            for col in lista_nombres:
+                if palabra_clave in col:
+                    return col
+            return None
 
-        # 2. Validación de columnas
-        if c_peso not in df.columns:
-            st.error(f"Error: No se encontró la columna '{c_peso}'. Columnas detectadas: {list(df.columns)}")
+        c_lote = buscar_columna(df.columns, "LOTE")
+        c_peso = buscar_columna(df.columns, "PESO")
+        c_zn = buscar_columna(df.columns, "ZN")
+        c_pb = buscar_columna(df.columns, "PB")
+        c_ag = buscar_columna(df.columns, "AG")
+
+        # Validación
+        if not c_peso or not c_zn:
+            st.error(f"No pude identificar las columnas. Detecté: {list(df.columns)}")
             st.stop()
 
-        # 3. Limpieza de datos (Convertir a números y quitar filas vacías)
+        # 2. Limpieza de datos (Convertir a números)
         for col in [c_peso, c_zn, c_pb, c_ag]:
-            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+            if col:
+                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
         
+        # Filtramos filas que no sean lotes (como los totales)
         df = df[df[c_peso] > 0].copy()
 
-        # 4. Optimización (Mínimo peso para usar lo disponible)
+        # 3. Optimización
         prob = LpProblem("Mezcla", LpMinimize)
         choices = LpVariable.dicts("L", df.index, lowBound=0)
         prob += lpSum([choices[i] for i in df.index])
@@ -83,15 +92,14 @@ if st.button("🚀 GENERAR BLEND"):
                         "Lote": df.loc[i, c_lote],
                         "Peso": val,
                         "Ley ZN": df.loc[i, c_zn],
-                        "Ley PB": df.loc[i, c_pb],
-                        "Ley AG": df.loc[i, c_ag]
+                        "Ley PB": df.loc[i, c_pb]
                     })
             
             rdf = pd.DataFrame(res)
             st.subheader("📋 Resultados del Blend")
             st.dataframe(rdf)
             
-            # 5. Cálculos de Balance Final
+            # 4. Cálculos de Balance
             p_tot = rdf['Peso'].sum()
             zn_prom = (rdf['Peso'] * rdf['Ley ZN']).sum() / p_tot
             pb_prom = (rdf['Peso'] * rdf['Ley PB']).sum() / p_tot
@@ -106,15 +114,13 @@ if st.button("🚀 GENERAR BLEND"):
             col2.metric("Conc. Zn (TMS)", f"{conc_zn:.2f}")
             col3.metric("Conc. Pb (TMS)", f"{conc_pb:.2f}")
             
-            st.info(f"Leyes Promedio Mezcla: Zn {zn_prom:.2f}% | Pb {pb_prom:.2f}%")
-
-            # 6. Envío de Correo (Simplificado para evitar IndentationError)
-            mensaje = f"Reporte Mezcla Parkano:\n\nTotal: {p_tot:.2f} TMH\nLeyes: Zn {zn_prom:.2f}%, Pb {pb_prom:.2f}%\nConc. Zn: {conc_zn:.2f} TMS\nConc. Pb: {conc_pb:.2f} TMS"
-            enviar_correo("Nuevo Reporte Generado", mensaje, "diego.bonilla@parkano.com.bo")
-            st.success("✅ Reporte enviado correctamente.")
+            # 5. Envío de Correo
+            msg = f"Reporte Parkano:\nTotal: {p_tot:.2f} TMH\nZn: {zn_prom:.2f}%\nPb: {pb_prom:.2f}%"
+            enviar_correo("Reporte Blend", msg, "diego.bonilla@parkano.com.bo")
+            st.success("✅ ¡Proceso completo! Correo enviado.")
 
         else:
-            st.error("No se pudo calcular una mezcla óptima.")
+            st.error("No se pudo calcular una mezcla.")
 
     except Exception as e:
-        st.error(f"Error crítico: {e}")
+        st.error(f"Error detectado: {e}")
