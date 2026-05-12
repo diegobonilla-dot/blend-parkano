@@ -43,32 +43,34 @@ if st.button("🚀 GENERAR BLEND"):
         st.warning("Pega el link primero.")
     else:
         try:
-            # Convertir link a CSV
-            url = sheet_url.replace('/edit?usp=sharing', '/export?format=csv').split('/edit')[0] + '/export?format=csv'
+            # Convertir link a CSV correctamente
+            base_url = sheet_url.split('/edit')[0]
+            url = f"{base_url}/export?format=csv"
             df = pd.read_csv(url)
             
-            # LIMPIEZA DE COLUMNAS: Quitamos espacios y pasamos a mayúsculas para comparar
-            original_cols = df.columns.tolist()
-            df.columns = df.columns.str.strip().str.upper()
+            # Limpiar nombres de columnas (quitar espacios y poner en mayúsculas)
+            df.columns = [str(c).strip().upper() for c in df.columns]
             
-            # Identificar columnas dinámicamente
-            def find_col(possible_names):
-                for p in possible_names:
-                    for c in df.columns:
-                        if p in c: return c
+            # Buscador ultra-flexible de columnas
+            def encontrar(lista_keywords):
+                for key in lista_keywords:
+                    for col in df.columns:
+                        if key in col:
+                            return col
                 return None
 
-            c_lote = find_col(['LOTE', 'ID'])
-            c_peso = find_col(['PESO', 'TM'])
-            c_zn = find_col(['ZN'])
-            c_pb = find_col(['PB'])
-            c_ag = find_col(['AG'])
+            c_lote = encontrar(['LOTE', 'ID', 'NOMBRE'])
+            c_peso = encontrar(['PESO', 'TMH', 'TON', 'MASA'])
+            c_zn = encontrar(['ZN', 'ZINC'])
+            c_pb = encontrar(['PB', 'PLOMO', 'LEAD'])
+            c_ag = encontrar(['AG', 'PLATA', 'SILVER'])
 
             if not all([c_lote, c_peso, c_zn, c_pb, c_ag]):
-                st.error(f"No encontré todas las columnas. Detectadas: {df.columns.tolist()}")
+                st.error(f"⚠️ Error de lectura. Columnas detectadas: {list(df.columns)}")
+                st.info("Asegúrate de que tu Excel tenga encabezados como: Lote, Peso, Zn, Pb, Ag.")
                 st.stop()
 
-            # Optimización
+            # Optimización simple
             prob = LpProblem("Mezcla", LpMinimize)
             choices = LpVariable.dicts("L", df.index, lowBound=0)
             prob += lpSum([choices[i] for i in df.index])
@@ -93,7 +95,7 @@ if st.button("🚀 GENERAR BLEND"):
                 st.subheader("📋 Resultados del Blend")
                 st.dataframe(rdf)
                 
-                # Cálculos de Balance
+                # Balance
                 p_tot = rdf['Peso_TMH'].sum()
                 zn_p = (rdf['Peso_TMH'] * rdf['Zn%']).sum() / p_tot
                 pb_p = (rdf['Peso_TMH'] * rdf['Pb%']).sum() / p_tot
@@ -103,19 +105,19 @@ if st.button("🚀 GENERAR BLEND"):
                 w_zn = (tms * (zn_p/100) * rec_zn) / (ley_conc_zn/100)
                 w_pb = (tms * (pb_p/100) * rec_pb) / (ley_conc_pb/100)
 
-                st.subheader("📊 Balance Metalúrgico")
-                st.info(f"**Blend Total:** {p_tot:.2f} TMH | **Seco (TMS):** {tms:.2f}")
+                st.subheader("📊 Balance Metalúrgico Proyectado")
+                st.write(f"**Total Blend:** {p_tot:.2f} TMH | **Seco:** {tms:.2f} TMS")
                 
                 c1, c2 = st.columns(2)
                 c1.metric("Conc. Zinc (TMS)", f"{w_zn:.2f}")
                 c2.metric("Conc. Plomo (TMS)", f"{w_pb:.2f}")
 
-                # Correo
+                # Correo simplificado para evitar errores de envío
                 msg = f"Blend Parkano:\nTotal: {p_tot:.2f} TMH\nZn: {zn_p:.2f}%\nPb: {pb_p:.2f}%"
                 enviar_correo("Nuevo Blend Generado", msg, "diego.bonilla@parkano.com.bo")
-                st.success("✅ Proceso completado y correo enviado.")
+                st.success("✅ ¡Mezcla procesada y correo enviado!")
             else:
-                st.error("No hay solución posible.")
+                st.error("No se pudo optimizar con los datos actuales.")
 
         except Exception as e:
-            st.error(f"Error crítico: {e}")
+            st.error(f"Error inesperado: {e}")
