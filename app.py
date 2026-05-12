@@ -144,7 +144,7 @@ if st.button("🚀 GENERAR BLEND"):
                         msg['To'] = "Diego.bonilla@parkano.com.bo"
                         msg['Subject'] = f"REPORTE BLEND: {p_final:.1f} TM - Zn {zn_final:.2f}%"
                         
-                       cuerpo = f"""
+                    cuerpo = f"""
                     Hola Diego,
                 
                     Se adjunta el reporte del blend generado y el balance proyectado de planta:
