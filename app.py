@@ -95,35 +95,32 @@ if st.button("🚀 GENERAR BLEND"):
                 st.success("✅ ¡Se encontró el blend perfecto!")
                 st.write(f"**Tonelaje:** {p_final:.2f} TM | **Zn:** {zn_final:.2f}% | **Pb:** {pb_final:.2f}% | **Ag:** {ag_final:.2f} DM")
                 st.dataframe(res_df)
-                # --- MATEMÁTICA DEL BALANCE ---
-                tms = p_final * (1 - h_perc)  # Toneladas Secas
+                
+                    # --- MATEMÁTICA DEL BALANCE ---
+                tms = p_final * (1 - h_perc)
+                
+                fino_zn_rec = tms * (zn_final / 100) * rec_zn
+                fino_pb_rec = tms * (pb_final / 100) * rec_pb
+                fino_ag_rec = (tms * ag_final) * rec_ag
+                
+                w_conc_zn = fino_zn_rec / (ley_conc_zn / 100)
+                w_conc_pb = fino_pb_rec / (ley_conc_pb / 100)
+                
+                ag_total_en_zn = w_conc_zn * ag_min_zn
+                ag_total_en_pb = max(0, fino_ag_rec - ag_total_en_zn)
+                ley_ag_en_pb = ag_total_en_pb / w_conc_pb if w_conc_pb > 0 else 0
+    
+                balance_dict = {
+                    "Producto": ["Cabeza (Seca)", "Conc. Zinc", "Conc. Plomo"],
+                    "TMS": [tms, w_conc_zn, w_conc_pb],
+                    "Ley Zn %": [zn_final, ley_conc_zn, 0.0],
+                    "Ley Pb %": [pb_final, 0.0, ley_conc_pb],
+                    "Ley Ag DM": [ag_final, ag_min_zn, ley_ag_en_pb]
+                }
+                df_balance = pd.DataFrame(balance_dict)
             
-               # Contenidos finos recuperados
-               fino_zn_rec = tms * (zn_final / 100) * rec_zn
-               fino_pb_rec = tms * (pb_final / 100) * rec_pb
-               fino_ag_rec = (tms * ag_final) * rec_ag
-            
-               # Pesos de los concentrados (TMS)
-               w_conc_zn = fino_zn_rec / (ley_conc_zn / 100)
-               w_conc_pb = fino_pb_rec / (ley_conc_pb / 100)
-            
-               # Reparto de Plata (Ag)
-               ag_total_en_zn = w_conc_zn * ag_min_zn # 2.5 DM fijos
-               ag_total_en_pb = max(0, fino_ag_rec - ag_total_en_zn) # El resto al Pb
-               ley_ag_en_pb = ag_total_en_pb / w_conc_pb if w_conc_pb > 0 else 0
-
-               # Crear Tabla de Balance para mostrar en pantalla
-               balance_dict = {
-                "Producto": ["Cabeza (Seca)", "Conc. Zinc", "Conc. Plomo"],
-                "TMS": [tms, w_conc_zn, w_conc_pb],
-                "Ley Zn %": [zn_final, ley_conc_zn, 0.0],
-                "Ley Pb %": [pb_final, 0.0, ley_conc_pb],
-                "Ley Ag DM": [ag_final, ag_min_zn, ley_ag_en_pb]
-               }
-               df_balance = pd.DataFrame(balance_dict)
-            
-               st.subheader("📊 Balance Metalúrgico Proyectado")
-               st.table(df_balance.style.format("{:.2f}"))
+                st.subheader("📊 Balance Metalúrgico Proyectado")
+                st.table(df_balance.style.format("{:.2f}"))
 
                 # 4. Generar la imagen para que puedan copiar y pegar
                 fig, ax = plt.subplots(figsize=(10, len(res_df)*0.4 + 1))
