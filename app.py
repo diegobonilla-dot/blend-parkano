@@ -43,62 +43,79 @@ if st.button("🚀 GENERAR BLEND"):
         st.warning("Pega el link primero.")
     else:
         try:
+            # Convertir link a CSV
             url = sheet_url.replace('/edit?usp=sharing', '/export?format=csv').split('/edit')[0] + '/export?format=csv'
             df = pd.read_csv(url)
             
-            # --- LIMPIEZA AUTOMÁTICA DE COLUMNAS ---
-            # Esto quita espacios y pone todo en mayúsculas para no fallar
+            # LIMPIEZA DE COLUMNAS: Quitamos espacios y pasamos a mayúsculas para comparar
+            original_cols = df.columns.tolist()
             df.columns = df.columns.str.strip().str.upper()
             
-            # Buscamos las columnas por sus nombres en tu imagen
-            col_lote = "ID LOTE"
-            col_peso = "PESO"
-            col_zn = "LEY ZN"
-            col_pb = "LEY PB"
-            col_ag = "LEY AG"
+            # Identificar columnas dinámicamente
+            def find_col(possible_names):
+                for p in possible_names:
+                    for c in df.columns:
+                        if p in c: return c
+                return None
 
-            # 2. Definir Optimización
-            prob = LpProblem("Optimizar_Mezcla", LpMinimize)
-            choices = LpVariable.dicts("Lote", df.index, lowBound=0, cat='Continuous')
+            c_lote = find_col(['LOTE', 'ID'])
+            c_peso = find_col(['PESO', 'TM'])
+            c_zn = find_col(['ZN'])
+            c_pb = find_col(['PB'])
+            c_ag = find_col(['AG'])
+
+            if not all([c_lote, c_peso, c_zn, c_pb, c_ag]):
+                st.error(f"No encontré todas las columnas. Detectadas: {df.columns.tolist()}")
+                st.stop()
+
+            # Optimización
+            prob = LpProblem("Mezcla", LpMinimize)
+            choices = LpVariable.dicts("L", df.index, lowBound=0)
             prob += lpSum([choices[i] for i in df.index])
-            
             for i in df.index:
-                prob += choices[i] <= df.loc[i, col_peso]
-                
+                prob += choices[i] <= df.loc[i, c_peso]
+            
             prob.solve()
             
             if value(prob.status) == 1:
-                res_list = []
+                res = []
                 for i in df.index:
                     if value(choices[i]) > 0:
-                        res_list.append({
-                            "Lote": df.loc[i, col_lote],
+                        res.append({
+                            "Lote": df.loc[i, c_lote],
                             "Peso_TMH": value(choices[i]),
-                            "Zn%": df.loc[i, col_zn],
-                            "Pb%": df.loc[i, col_pb],
-                            "Ag_DM": df.loc[i, col_ag]
+                            "Zn%": df.loc[i, c_zn],
+                            "Pb%": df.loc[i, c_pb],
+                            "Ag_DM": df.loc[i, c_ag]
                         })
                 
-                res_df = pd.DataFrame(res_list)
-                st.subheader("📋 Resumen del Blend")
-                st.dataframe(res_df)
+                rdf = pd.DataFrame(res)
+                st.subheader("📋 Resultados del Blend")
+                st.dataframe(rdf)
                 
-                # Balance proyectado
-                p_final = res_df['Peso_TMH'].sum()
-                zn_final = (res_df['Peso_TMH'] * res_df['Zn%']).sum() / p_final
-                pb_final = (res_df['Peso_TMH'] * res_df['Pb%']).sum() / p_final
-                ag_final = (res_df['Peso_TMH'] * res_df['Ag_DM']).sum() / p_final
+                # Cálculos de Balance
+                p_tot = rdf['Peso_TMH'].sum()
+                zn_p = (rdf['Peso_TMH'] * rdf['Zn%']).sum() / p_tot
+                pb_p = (rdf['Peso_TMH'] * rdf['Pb%']).sum() / p_tot
+                ag_p = (rdf['Peso_TMH'] * rdf['Ag_DM']).sum() / p_tot
                 
-                tms = p_final * (1 - h_perc)
-                w_conc_zn = (tms * (zn_final/100) * rec_zn) / (ley_conc_zn/100)
-                w_conc_pb = (tms * (pb_final/100) * rec_pb) / (ley_conc_pb/100)
+                tms = p_tot * (1 - h_perc)
+                w_zn = (tms * (zn_p/100) * rec_zn) / (ley_conc_zn/100)
+                w_pb = (tms * (pb_p/100) * rec_pb) / (ley_conc_pb/100)
 
-                st.subheader("📊 Balance Proyectado")
-                st.write(f"**Total Blend:** {p_final:.2f} TMH | **Zn:** {zn_final:.2f}% | **Pb:** {pb_final:.2f}%")
+                st.subheader("📊 Balance Metalúrgico")
+                st.info(f"**Blend Total:** {p_tot:.2f} TMH | **Seco (TMS):** {tms:.2f}")
                 
-                st.success("✅ ¡Mezcla procesada con éxito!")
+                c1, c2 = st.columns(2)
+                c1.metric("Conc. Zinc (TMS)", f"{w_zn:.2f}")
+                c2.metric("Conc. Plomo (TMS)", f"{w_pb:.2f}")
+
+                # Correo
+                msg = f"Blend Parkano:\nTotal: {p_tot:.2f} TMH\nZn: {zn_p:.2f}%\nPb: {pb_p:.2f}%"
+                enviar_correo("Nuevo Blend Generado", msg, "diego.bonilla@parkano.com.bo")
+                st.success("✅ Proceso completado y correo enviado.")
             else:
-                st.error("No se encontró solución.")
+                st.error("No hay solución posible.")
 
         except Exception as e:
-            st.error(f"Error: {e}. Verifica que el link sea público (Cualquiera con el enlace puede leer).")
+            st.error(f"Error crítico: {e}")
