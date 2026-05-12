@@ -53,14 +53,29 @@ sheet_url = st.text_input(
 if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
     try:
         # ── 1. LECTURA DE DATOS ──────────────────────────────────────────
-        if '/edit' in sheet_url and 'gid=' in sheet_url:
-            csv_url = sheet_url.replace('/edit#gid=', '/export?format=csv&gid=')
-        elif '/edit' in sheet_url:
-            csv_url = sheet_url.replace('/edit', '/export?format=csv')
-        else:
-            csv_url = sheet_url
-
-        df = pd.read_csv(csv_url)
+        # Extraer el ID del Sheets del URL
+        import re
+        sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', sheet_url)
+        
+        if not sheet_id_match:
+            st.error("❌ El link del Google Sheets no es válido. Asegúrate de usar un link que contenga '/d/'")
+            st.stop()
+        
+        sheet_id = sheet_id_match.group(1)
+        
+        # Extraer el GID (ID de la hoja específica) si existe
+        gid_match = re.search(r'[#&]gid=(\d+)', sheet_url)
+        gid = gid_match.group(1) if gid_match else '0'
+        
+        # Construir la URL de exportación correctamente
+        csv_url = f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv&gid={gid}"
+        
+        try:
+            df = pd.read_csv(csv_url)
+        except Exception as e:
+            st.error(f"❌ Error al leer el CSV: {e}")
+            st.error("Intenta esto: Asegúrate de que el link sea compartible (public o con permisos de lectura)")
+            st.stop()
         df.columns = [str(c).upper().strip() for c in df.columns]
 
         # Mapeo flexible de columnas
