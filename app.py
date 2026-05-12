@@ -145,21 +145,21 @@ if st.button("🚀 GENERAR BLEND"):
                         msg['Subject'] = f"REPORTE BLEND: {p_final:.1f} TM - Zn {zn_final:.2f}%"
                         
                        cuerpo = f"""
-                Hola Diego,
-            
-                Se adjunta el reporte del blend generado y el balance proyectado de planta:
-            
-                1. RESUMEN DEL BLEND (Húmedo):
-                - Peso Total: {p_final:.2f} TMH
-                - Leyes: Zn {zn_final:.2f}% | Pb {pb_final:.2f}% | Ag {ag_final:.2f} DM
-            
-                2. BALANCE PROYECTADO (Seco):
-                - Humedad aplicada: {h_perc*100}%
-                - Conc. Zinc: {w_conc_zn:.2f} TMS @ {ley_conc_zn}% Zn | {ag_min_zn} DM Ag
-                - Conc. Plomo: {w_conc_pb:.2f} TMS @ {ley_conc_pb}% Pb | {ley_ag_en_pb:.2f} DM Ag
-            
-                Saludos,
-                Sistema de Mezclas Parkano.
+                    Hola Diego,
+                
+                    Se adjunta el reporte del blend generado y el balance proyectado de planta:
+                
+                    1. RESUMEN DEL BLEND (Húmedo):
+                    - Peso Total: {p_final:.2f} TMH
+                    - Leyes: Zn {zn_final:.2f}% | Pb {pb_final:.2f}% | Ag {ag_final:.2f} DM
+                
+                    2. BALANCE PROYECTADO (Seco):
+                    - Humedad aplicada: {h_perc*100}%
+                    - Conc. Zinc: {w_conc_zn:.2f} TMS @ {ley_conc_zn}% Zn | {ag_min_zn} DM Ag
+                    - Conc. Plomo: {w_conc_pb:.2f} TMS @ {ley_conc_pb}% Pb | {ley_ag_en_pb:.2f} DM Ag
+                
+                    Saludos,
+                    Sistema de Mezclas Parkano.
                 """
                         msg.attach(MIMEText(cuerpo, 'plain'))
                         
