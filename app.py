@@ -1,36 +1,9 @@
 import streamlit as st
 import pandas as pd
 from pulp import LpProblem, LpVariable, lpSum, LpMinimize, value, LpStatus
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Sistema Parkano v6", layout="wide")
-
-# ─────────────────────────────────────────────
-#  FUNCIÓN DE ENVÍO DE CORREO
-# ─────────────────────────────────────────────
-def enviar_correo(asunto, cuerpo_html, destinatarios: list):
-    remitente = "mezclasparkano@gmail.com"
-    password   = "shre kfdy flin hscs"   # App Password de Google
-
-    for dest in destinatarios:
-        msg = MIMEMultipart()
-        msg['From']    = remitente
-        msg['To']      = dest
-        msg['Subject'] = asunto
-        msg.attach(MIMEText(cuerpo_html, 'html'))
-        try:
-            server = smtplib.SMTP('smtp.gmail.com', 587)
-            server.starttls()
-            server.login(remitente, password)
-            server.sendmail(remitente, dest, msg.as_string())
-            server.quit()
-        except Exception as e:
-            st.error(f"Error al enviar a {dest}: {e}")
-            return False
-    return True
 
 
 # ─────────────────────────────────────────────
@@ -65,13 +38,6 @@ st.sidebar.header("🔒 Parámetros de Concentrados")
 ley_conc_zn   = st.sidebar.number_input("Ley Conc. Zn (%)",      value=50.0, step=1.0) / 100.0
 ley_conc_pb   = st.sidebar.number_input("Ley Conc. Pb (%)",      value=60.0, step=1.0) / 100.0
 ag_min_conc_zn = st.sidebar.number_input("Ag mín en Conc. Zn (DM)", value=2.5, step=0.1)
-
-st.sidebar.header("📧 Destinatarios del Reporte")
-destinatarios_raw = st.sidebar.text_area(
-    "Correos (uno por línea)",
-    value="diego.bonilla@parkano.com.bo"
-)
-destinatarios = [e.strip() for e in destinatarios_raw.splitlines() if e.strip()]
 
 # ─────────────────────────────────────────────
 #  FUENTE DE DATOS
@@ -263,87 +229,6 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
             f"✅ Conc. Zn asegurado a **{ag_en_conc_zn_dm:.2f} DM** de Ag  |  "
             f"Conc. Pb con **{ag_en_conc_pb_dm:.2f} DM** de Ag (plata restante)"
         )
-
-        # ── 5. TABLA LOTES DETALLADA (HTML para correo) ─────────────────
-        filas_lotes = "".join([
-            f"<tr><td>{r['Lote']}</td><td>{r['TMH']:.2f}</td>"
-            f"<td>{r['Zn %']:.2f}</td><td>{r['Pb %']:.2f}</td><td>{r['Ag DM']:.3f}</td></tr>"
-            for _, r in rdf.iterrows()
-        ])
-        tabla_lotes_html = f"""
-        <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;font-size:13px'>
-          <thead style='background:#1a3c5e;color:white'>
-            <tr><th>Lote</th><th>TMH</th><th>Zn %</th><th>Pb %</th><th>Ag DM</th></tr>
-          </thead>
-          <tbody>{filas_lotes}</tbody>
-          <tfoot style='background:#eef2f7;font-weight:bold'>
-            <tr>
-              <td>TOTAL / CABEZA</td>
-              <td>{tmh_total:.2f}</td>
-              <td>{zn_cabeza:.2f}</td>
-              <td>{pb_cabeza:.2f}</td>
-              <td>{ag_cabeza:.3f}</td>
-            </tr>
-          </tfoot>
-        </table>"""
-
-        cuerpo_html = f"""
-        <html><body style='font-family:Arial,sans-serif;color:#222'>
-          <h2 style='color:#1a3c5e'>⚒️ Reporte de Blend y Balance — Parkano</h2>
-
-          <h3>1. Lotes Seleccionados</h3>
-          {tabla_lotes_html}
-
-          <h3 style='margin-top:24px'>2. Leyes de Cabeza del Blend</h3>
-          <ul>
-            <li><b>TMH Total:</b> {tmh_total:.2f}</li>
-            <li><b>TMS (−{h_perc*100:.0f}% humedad):</b> {tms_total:.2f}</li>
-            <li><b>Zn:</b> {zn_cabeza:.2f} % &nbsp;|&nbsp;
-                <b>Pb:</b> {pb_cabeza:.2f} % &nbsp;|&nbsp;
-                <b>Ag:</b> {ag_cabeza:.3f} DM</li>
-          </ul>
-
-          <h3>3. Proyección de Concentrados</h3>
-          <table border='1' cellpadding='6' cellspacing='0' style='border-collapse:collapse;font-size:13px'>
-            <thead style='background:#1a3c5e;color:white'>
-              <tr><th>Concentrado</th><th>TMS</th><th>Ley Zn (%)</th><th>Ley Pb (%)</th><th>Ag (DM)</th></tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>Zinc</td>
-                <td>{tms_conc_zn:.2f}</td>
-                <td>{ley_conc_zn*100:.0f} %</td>
-                <td>—</td>
-                <td>{ag_en_conc_zn_dm:.2f} (garantizado ≥ {ag_min_conc_zn} DM)</td>
-              </tr>
-              <tr>
-                <td>Plomo</td>
-                <td>{tms_conc_pb:.2f}</td>
-                <td>—</td>
-                <td>{ley_conc_pb*100:.0f} %</td>
-                <td>{ag_en_conc_pb_dm:.2f}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <p style='color:#555;font-size:12px;margin-top:20px'>
-            Recuperaciones aplicadas: Zn {rec_zn*100:.0f}% · Pb {rec_pb*100:.0f}% · Ag {rec_ag*100:.0f}%
-          </p>
-          <p style='color:#888;font-size:11px'>Generado automáticamente por Sistema Parkano v6</p>
-        </body></html>
-        """
-
-        # ── 6. ENVÍO DE CORREO ───────────────────────────────────────────
-        if destinatarios:
-            enviado = enviar_correo(
-                "📊 Balance Proyectado — Blend Parkano",
-                cuerpo_html,
-                destinatarios
-            )
-            if enviado:
-                st.success(f"✅ Reporte enviado a: {', '.join(destinatarios)}")
-        else:
-            st.info("ℹ️ No hay destinatarios configurados. El reporte no se envió por correo.")
 
     except Exception as e:
         st.error(f"❌ Error: {e}")
