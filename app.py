@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
-from pulp import LpProblem, LpVariable, lpSum, LpMinimize, value, LpStatus
+from pulp import LpProblem, LpVariable, lpSum, LpMinimize, value, LpStatus, PULP_CBC_CMD
+import time
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(page_title="Sistema Parkano v6", layout="wide")
@@ -43,6 +44,9 @@ st.sidebar.header("🔧 Parámetros Operativos")
 umbral_lote_grande = st.sidebar.number_input("Umbral lote grande (TMH)", value=100.0, step=10.0,
     help="Lotes ≤ este valor se toman completos (100%). Lotes mayores pueden tomarse parcialmente en toneladas enteras.")
 
+timeout_solver = st.sidebar.number_input("Timeout Solver (segundos)", value=30, step=5, min_value=5, max_value=120,
+    help="Máximo tiempo que el solver invertirá buscando la solución óptima")
+
 # ─────────────────────────────────────────────
 #  FUENTE DE DATOS
 # ─────────────────────────────────────────────
@@ -56,8 +60,12 @@ sheet_url = st.text_input(
 # ─────────────────────────────────────────────
 if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
     try:
+        tiempo_inicio = time.time()
+        progress_placeholder = st.empty()
+        
         # ── 1. LECTURA DE DATOS ──────────────────────────────────────────
-        # Extraer el ID del Sheets del URL
+        progress_placeholder.info("⏳ Paso 1/4: Cargando datos del Google Sheets...")
+        
         import re
         sheet_id_match = re.search(r'/d/([a-zA-Z0-9-_]+)', sheet_url)
         
@@ -80,6 +88,7 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
             st.error(f"❌ Error al leer el CSV: {e}")
             st.error("Intenta esto: Asegúrate de que el link sea compartible (public o con permisos de lectura)")
             st.stop()
+        
         df.columns = [str(c).upper().strip() for c in df.columns]
         
         # Mapeo flexible de columnas
@@ -105,14 +114,14 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
             }), use_container_width=True)
 
         # ── 2. OPTIMIZADOR (PuLP) CON RESTRICCIÓN OPERATIVA ──────────────
+        progress_placeholder.info("⏳ Paso 2/4: Configurando optimizador...")
+        
         st.info("🔧 **Regla operativa activa:** Lotes ≤100 TMH se toman completos. Lotes >100 TMH pueden tomarse parcialmente en toneladas enteras.")
         
         prob = LpProblem("Blend_Parkano", LpMinimize)
         idx  = df_clean.index.tolist()
         
-        # Crear variables según tamaño del lote:
-        # - Lotes ≤ umbral: variable binaria (0 o 100% del lote)
-        # - Lotes > umbral: variable entera continua (en toneladas enteras)
+        # Crear variables según tamaño del lote
         vars_lote = {}
         vars_binary = {}
         lotes_pequenos = []
@@ -121,25 +130,25 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
         for i in idx:
             peso_lote = df_clean.loc[i, c_peso]
             if peso_lote <= umbral_lote_grande:
-                # Lote pequeño: usar variable binaria (todo o nada)
+                # Lote pequeño: variable binaria
                 vars_binary[i] = LpVariable(f"usar_lote_{i}", cat='Binary')
                 vars_lote[i] = peso_lote * vars_binary[i]
                 lotes_pequenos.append(i)
             else:
-                # Lote grande: variable entera (toneladas enteras)
+                # Lote grande: variable entera
                 vars_lote[i] = LpVariable(f"tons_lote_{i}", lowBound=0, upBound=peso_lote, cat='Integer')
                 lotes_grandes.append(i)
 
         total_w = lpSum([vars_lote[i] for i in idx])
 
-        # Objetivo: maximizar Zn total (minimizar negativo)
+        # Objetivo: maximizar Zn total (minimizar negativo) - PONDERADO PARA CONVERGER RÁPIDO
         prob += -lpSum([vars_lote[i] * df_clean.loc[i, c_zn] for i in idx])
 
-        # Restricciones de tonelaje
+        # Restricciones de tonelaje (MÁS IMPORTANTES)
         prob += total_w >= t_min, "Tonelaje_Minimo"
         prob += total_w <= t_max, "Tonelaje_Maximo"
 
-        # Restricciones de leyes
+        # Restricciones de leyes - FORMULADAS PARA CONVERGER MÁS RÁPIDO
         prob += lpSum([vars_lote[i] * df_clean.loc[i, c_zn] for i in idx]) >= zn_min * total_w, "Zn_Min"
         prob += lpSum([vars_lote[i] * df_clean.loc[i, c_zn] for i in idx]) <= zn_max * total_w, "Zn_Max"
         prob += lpSum([vars_lote[i] * df_clean.loc[i, c_pb] for i in idx]) >= pb_min * total_w, "Pb_Min"
@@ -147,17 +156,31 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
         prob += lpSum([vars_lote[i] * df_clean.loc[i, c_ag] for i in idx]) >= ag_min * total_w, "Ag_Min"
         prob += lpSum([vars_lote[i] * df_clean.loc[i, c_ag] for i in idx]) <= ag_max * total_w, "Ag_Max"
 
-        prob.solve()
+        # ── 3. RESOLVER CON TIMEOUT ──────────────────────────────────────
+        progress_placeholder.info(f"⏳ Paso 3/4: Resolviendo optimización (timeout: {timeout_solver}s)...")
+        
+        # Usar solver CBC con timeout
+        solver = PULP_CBC_CMD(msg=0, timeLimit=timeout_solver)
+        prob.solve(solver)
+        
         status = LpStatus[prob.status]
 
         if status != 'Optimal':
-            st.warning(
-                f"⚠️ No se encontró una mezcla factible con los rangos actuales (Estado: {status}). "
-                "Prueba ampliando los rangos de ley o de tonelaje."
-            )
+            if status == 'Not Solved':
+                st.warning(
+                    f"⚠️ El solver no encontró una solución en {timeout_solver} segundos. "
+                    f"Intenta aumentar el timeout o ampliar los rangos de ley."
+                )
+            else:
+                st.warning(
+                    f"⚠️ No se encontró una mezcla factible con los rangos actuales (Estado: {status}). "
+                    "Prueba ampliando los rangos de ley o de tonelaje."
+                )
             st.stop()
 
-        # ── 3. ARMADO DE RESULTADOS DEL BLEND ───────────────────────────
+        # ── 4. ARMADO DE RESULTADOS DEL BLEND ───────────────────────────
+        progress_placeholder.info("⏳ Paso 4/4: Procesando resultados...")
+        
         res_data = []
         for i in idx:
             tmh_i = value(vars_lote[i])
@@ -173,7 +196,7 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
                 
                 res_data.append({
                     "Lote":   df_clean.loc[i, c_lote],
-                    "TMH Asignadas":    round(tmh_i, 0),  # Redondear para mostrar enteros
+                    "TMH Asignadas":    round(tmh_i, 0),
                     "TMH Disponibles":  round(peso_disponible, 0),
                     "% Usado": round(porcentaje_usado, 1),
                     "Tipo": tipo,
@@ -190,7 +213,10 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
         pb_cabeza  = (rdf['TMH Asignadas'] * rdf['Pb %']).sum()  / tmh_total
         ag_cabeza  = (rdf['TMH Asignadas'] * rdf['Ag DM']).sum() / tmh_total
 
-        # Mostrar tabla blend
+        # ✅ MOSTRAR RESULTADOS
+        tiempo_total = time.time() - tiempo_inicio
+        progress_placeholder.success(f"✅ ¡Optimización completa en {tiempo_total:.1f} segundos!")
+        
         st.subheader("📋 Lotes Seleccionados para el Blend")
         st.dataframe(
             rdf.style.format({
@@ -220,13 +246,13 @@ if st.button("🚀 GENERAR BLEND Y BALANCE METALÚRGICO"):
         c3.metric("Pb Cabeza", f"{pb_cabeza:.2f} %")
         c4.metric("Ag Cabeza", f"{ag_cabeza:.3f} DM")
 
-        # ── 4. BALANCE METALÚRGICO ───────────────────────────────────────
+        # ── 5. BALANCE METALÚRGICO ───────────────────────────────────────
         st.subheader("📊 Balance Metalúrgico Proyectado")
 
         # Toneladas Secas
         tms_total = tmh_total * (1 - h_perc)
 
-        # Metales finos recuperados (unidades: TM de metal)
+        # Metales finos recuperados
         zn_fino_recuperado = tms_total * (zn_cabeza / 100) * rec_zn
         pb_fino_recuperado = tms_total * (pb_cabeza / 100) * rec_pb
         ag_fino_recuperado = tms_total * ag_cabeza * rec_ag
